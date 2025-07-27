@@ -12,88 +12,71 @@ import (
 )
 
 type Consumer struct {
-	client      *redis.Client
-	logger      *logrus.Logger
-	config      *pubsub.Config
-	middlewares []pubsub.Middleware
-	wg          sync.WaitGroup
-	cancel      context.CancelFunc
+	client *redis.Client
+	logger *logrus.Logger
+	config *pubsub.Config
+	wg     sync.WaitGroup
+	cancel context.CancelFunc
 }
 
 func NewConsumer(client *redis.Client, logger *logrus.Logger, config *pubsub.Config) *Consumer {
 	return &Consumer{
-		client:      client,
-		logger:      logger,
-		config:      config,
-		middlewares: make([]pubsub.Middleware, 0),
+		client: client,
+		logger: logger,
+		config: config,
 	}
-}
-
-func (c *Consumer) AddMiddleware(middleware pubsub.Middleware) {
-	c.middlewares = append(c.middlewares, middleware)
 }
 
 func (c *Consumer) Subscribe(ctx context.Context, topic string, handler pubsub.EventHandler) error {
 	ctx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 
-	finalHandler := handler
-	for i := len(c.middlewares) - 1; i >= 0; i-- {
-		finalHandler = c.middlewares[i](finalHandler)
-	}
-
 	pubsub := c.client.Subscribe(ctx, topic)
 	defer pubsub.Close()
 
 	ch := pubsub.Channel()
 
-	eventChan := make(chan *events.Event, c.config.BufferSize)
+	c.logger.WithFields(logrus.Fields{
+		"topic":       topic,
+		"max_workers": c.config.MaxWorkers,
+	}).Info("Started consuming events (no buffer - max speed)")
 
 	for i := 0; i < c.config.MaxWorkers; i++ {
 		c.wg.Add(1)
-		go c.worker(ctx, eventChan, finalHandler)
+		go c.worker(ctx, ch, handler, i)
 	}
+
+	c.wg.Wait()
+	return ctx.Err()
+}
+
+func (c *Consumer) worker(ctx context.Context, ch <-chan *redis.Message, handler pubsub.EventHandler, workerID int) {
+	defer c.wg.Done()
+
+	c.logger.WithField("worker_id", workerID).Info("Worker started")
 
 	for {
 		select {
 		case <-ctx.Done():
-			close(eventChan)
-			c.wg.Wait()
-			return ctx.Err()
-		case msg := <-ch:
+			c.logger.WithField("worker_id", workerID).Info("Worker stopped")
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				c.logger.WithField("worker_id", workerID).Info("Channel closed, worker stopping")
+				return
+			}
+
 			var event events.Event
 			if err := json.Unmarshal([]byte(msg.Payload), &event); err != nil {
 				c.logger.WithError(err).Error("Failed to unmarshal event")
 				continue
 			}
 
-			select {
-			case eventChan <- &event:
-			case <-ctx.Done():
-				close(eventChan)
-				c.wg.Wait()
-				return ctx.Err()
-			}
-		}
-	}
-}
-
-func (c *Consumer) worker(ctx context.Context, eventChan <-chan *events.Event, handler pubsub.EventHandler) {
-	defer c.wg.Done()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case event, ok := <-eventChan:
-			if !ok {
-				return
-			}
-
-			if err := handler(ctx, event); err != nil {
+			if err := handler(ctx, &event); err != nil {
 				c.logger.WithFields(logrus.Fields{
 					"event_id":       event.ID,
 					"correlation_id": event.CorrelationID,
+					"worker_id":      workerID,
 				}).WithError(err).Error("Event processing failed")
 			}
 		}

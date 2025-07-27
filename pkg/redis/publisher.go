@@ -6,21 +6,18 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/leonardotomascostadasilva/pubsub-go/pkg/events"
-	"github.com/leonardotomascostadasilva/pubsub-go/pkg/pubsub"
 	"github.com/sirupsen/logrus"
 )
 
 type Publisher struct {
 	client *redis.Client
 	logger *logrus.Logger
-	config *pubsub.Config
 }
 
-func NewPublisher(client *redis.Client, logger *logrus.Logger, config *pubsub.Config) *Publisher {
+func NewPublisher(client *redis.Client, logger *logrus.Logger) *Publisher {
 	return &Publisher{
 		client: client,
 		logger: logger,
-		config: config,
 	}
 }
 

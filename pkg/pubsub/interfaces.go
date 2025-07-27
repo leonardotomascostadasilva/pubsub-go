@@ -17,5 +17,3 @@ type EventConsumer interface {
 }
 
 type EventHandler func(ctx context.Context, event *events.Event) error
-
-type Middleware func(next EventHandler) EventHandler
