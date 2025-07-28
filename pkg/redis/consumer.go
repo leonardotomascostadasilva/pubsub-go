@@ -54,12 +54,6 @@ func (c *Consumer) Subscribe(ctx context.Context, topic string, handler pubsub.E
 		go c.worker(ctx, eventChan, finalHandler)
 	}
 
-	c.logger.WithFields(logrus.Fields{
-		"topic":       topic,
-		"max_workers": c.config.MaxWorkers,
-		"buffer_size": c.config.BufferSize,
-	}).Info("Started consuming events")
-
 	for {
 		select {
 		case <-ctx.Done():

@@ -41,13 +41,6 @@ func (p *Publisher) Publish(ctx context.Context, topic string, event *events.Eve
 		return err
 	}
 
-	p.logger.WithFields(logrus.Fields{
-		"topic":          topic,
-		"event_id":       event.ID,
-		"event_name":     event.Name,
-		"correlation_id": event.CorrelationID,
-	}).Info("Event published successfully")
-
 	return nil
 }
 
